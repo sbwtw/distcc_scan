@@ -1,0 +1,10 @@
+[package]
+name = "distcc_finder"
+version = "0.1.0"
+authors = ["石博文 <sbw@sbw.so>"]
+
+[dependencies]
+log = "*"
+env_logger = "*"
+minilzo = "*"
+rand = "*"
