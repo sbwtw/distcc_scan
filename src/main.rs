@@ -3,19 +3,15 @@
 extern crate log;
 extern crate env_logger;
 extern crate minilzo;
-extern crate rand;
 
-use std::net::{TcpStream, Ipv4Addr};
+use std::net::{TcpStream, Ipv4Addr, SocketAddrV4};
 use std::io::{Write, Read};
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver};
 use std::thread;
-use std::ops::AddAssign;
 
 use minilzo::compress;
 use minilzo::decompress;
-
-use rand::{Rng, thread_rng};
 
 trait IncAddr {
     fn inc(&self, mask: u32) -> Option<Ipv4Addr>;
@@ -69,7 +65,7 @@ fn generate_addr(base: Ipv4Addr, mask: u32) -> Receiver<Ipv4Addr> {
     thread::spawn(move || {
         let mut ip = base;
         loop {
-            tx.send(ip);
+            tx.send(ip).unwrap();
 
             if let Some(r) = ip.inc(mask) {
                 ip = r;
@@ -108,19 +104,6 @@ fn scan(ip: Ipv4Addr, mask: u32) -> Receiver<Ipv4Addr> {
 }
 
 fn test_live(ip: Ipv4Addr) -> bool {
-    true
-}
-
-fn main() {
-
-    env_logger::init().unwrap();
-
-    let rx = scan(Ipv4Addr::new(127, 0, 0, 0), 24);
-    while let Ok(r) = rx.recv() {
-        println!("{:?}", r);
-    }
-
-    return;
 
     let data = "\n    int b(){   int a=0;    return a;} \n\n int c () { int aaa=0; return aaa;}       \
                 /*  aaa aa aa aa */";
@@ -134,7 +117,10 @@ fn main() {
     let test = "DIST00000002ARGC00000005ARGV00000003g++ARGV00000002-cARGV00000002-oARGV00000001aARGV000000051.\
                 cppDOTI";
     let r = num_to_hex(compressed.len() as u32);
-    let mut stream = TcpStream::connect("10.0.12.102:3632").unwrap();
+    let mut stream = match TcpStream::connect(SocketAddrV4::new(ip, 3632)) {
+        Ok(s) => s,
+        _ => return false,
+    };
 
     stream.write(test.as_bytes());
     stream.write(r.as_bytes());
@@ -142,9 +128,21 @@ fn main() {
 
     let mut buf = [0; 1024];
     let r = stream.read(&mut buf);
-    println!("{:?}", r);
-    for i in buf.iter() {
-        print!("{}", *i as char);
+    // println!("{:?}", r);
+    // for i in buf.iter() {
+        // print!("{}", *i as char);
+    // }
+
+    true
+}
+
+fn main() {
+
+    env_logger::init().unwrap();
+
+    let rx = scan(Ipv4Addr::new(127, 0, 0, 0), 30);
+    while let Ok(r) = rx.recv() {
+        println!("{:?}", r);
     }
 }
 
