@@ -11,7 +11,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::thread;
 
 use minilzo::compress;
-use minilzo::decompress;
+// use minilzo::decompress;
 
 trait IncAddr {
     fn inc(&self, mask: u32) -> Option<Ipv4Addr>;
@@ -22,9 +22,7 @@ impl IncAddr for Ipv4Addr {
         let bits = self.octets();
         let shift = 32 - mask;
         let mask = (0xffffffff >> shift) << shift;
-        let num = (bits[0] as u32) << 24 |
-                  (bits[1] as u32) << 16 |
-                  (bits[2] as u32) << 8  |
+        let num = (bits[0] as u32) << 24 | (bits[1] as u32) << 16 | (bits[2] as u32) << 8 |
                   (bits[3] as u32);
 
         let next = num + 1;
@@ -33,6 +31,59 @@ impl IncAddr for Ipv4Addr {
         } else {
             None
         }
+    }
+}
+
+struct Distcc<R> {
+    rdr: R,
+    version: usize,
+}
+
+impl<R: Read> Distcc<R> {
+    fn new(rdr: R) -> Distcc<R> {
+        Distcc {
+            rdr: rdr,
+            version: 0,
+        }
+    }
+
+    fn verify_package(&mut self) -> bool {
+
+        // let mut buf = [0; 1024];
+        // self.rdr.read(&mut buf);
+
+        // for c in buf.iter() {
+        //     print!("{}", *c as char);
+        // }
+
+        let (section, size) = self.read_section().unwrap();
+        println!("{:?} - {}", String::from_utf8_lossy(&section[..]), size);
+
+        true
+    }
+
+    fn read_section(&mut self) -> Option<([u8; 4], usize)> {
+
+        let mut section = [0; 4];
+        let mut size = [0; 8];
+
+        if let Ok(r) = self.rdr.read(&mut section) {
+            if r != 4 {
+                return None;
+            }
+        }
+
+        if let Ok(r) = self.rdr.read(&mut size) {
+            if r != 8 {
+                return None;
+            }
+        }
+
+        if let Ok(num) = hex_to_num(&size) {
+            return Some((section, num));
+        }
+
+        None
     }
 }
 
@@ -45,8 +96,8 @@ fn num_to_hex(num: u32) -> String {
         num /= 16;
 
         match c {
-            c @ 0...9 => r.insert(0, ('0' as u8 + c) as char),
-            c @ 10...15 => r.insert(0, ('a' as u8 + c - 10) as char),
+            c @ 0...9 => r.insert(0, (b'0' + c) as char),
+            c @ 10...15 => r.insert(0, (b'a' + c - 10) as char),
             _ => unreachable!(),
         }
     }
@@ -57,6 +108,28 @@ fn num_to_hex(num: u32) -> String {
     }
 
     r
+}
+
+fn hex_to_num(array: &[u8]) -> Result<usize, ()> {
+    if array.len() != 8 {
+        return Err(());
+    }
+
+    let mut num = 0;
+    let mut pow = 1;
+    for i in array.iter().rev() {
+
+        let n = match i {
+            n @ &b'0'...b'9' => (n - b'0') as usize,
+            n @ &b'a'...b'f' => (n - b'a') as usize + 10,
+            _ => return Err(()),
+        };
+
+        num += pow * n;
+        pow *= 16;
+    }
+
+    Ok(num)
 }
 
 fn generate_addr(base: Ipv4Addr, mask: u32) -> Receiver<Ipv4Addr> {
@@ -95,7 +168,9 @@ fn scan(ip: Ipv4Addr, mask: u32) -> Receiver<Ipv4Addr> {
                 };
 
                 info!("scan with thread {} for ip {:?}", i, ip);
-                if test_live(ip) { tx.send(ip).unwrap(); }
+                if test_live(ip) {
+                    tx.send(ip).unwrap();
+                }
             }
         });
     }
@@ -122,25 +197,29 @@ fn test_live(ip: Ipv4Addr) -> bool {
         _ => return false,
     };
 
-    stream.write(test.as_bytes());
-    stream.write(r.as_bytes());
-    stream.write(&compressed);
+    stream.write(test.as_bytes()).unwrap();
+    stream.write(r.as_bytes()).unwrap();
+    stream.write(&compressed).unwrap();
 
-    let mut buf = [0; 1024];
-    let r = stream.read(&mut buf);
+    let mut distcc = Distcc::new(&mut stream);
+    distcc.verify_package()
+
+
+    // let mut buf = [0; 1024];
+    // let r = stream.read(&mut buf);
     // println!("{:?}", r);
     // for i in buf.iter() {
-        // print!("{}", *i as char);
+    //     print!("{}", *i as char);
     // }
 
-    true
+    // true
 }
 
 fn main() {
 
     env_logger::init().unwrap();
 
-    let rx = scan(Ipv4Addr::new(127, 0, 0, 0), 30);
+    let rx = scan(Ipv4Addr::new(127, 0, 0, 0), 31);
     while let Ok(r) = rx.recv() {
         println!("{:?}", r);
     }
@@ -159,6 +238,17 @@ fn test_num_to_hex() {
 
     let r = num_to_hex(4294967295);
     assert_eq!(r, "ffffffff");
+}
+
+#[test]
+fn test_hex_to_num() {
+    assert_eq!(hex_to_num("00000000".as_ref()), Ok(0));
+    assert_eq!(hex_to_num("0000000f".as_ref()), Ok(15));
+    assert_eq!(hex_to_num("0000007b".as_ref()), Ok(123));
+    assert_eq!(hex_to_num("ffffffff".as_ref()), Ok(4294967295));
+
+    assert_eq!(hex_to_num("0000000".as_ref()), Err(()));
+    assert_eq!(hex_to_num("000000000".as_ref()), Err(()));
 }
 
 #[test]
