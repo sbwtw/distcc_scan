@@ -18,15 +18,13 @@ trait IncAddr {
 }
 
 impl IncAddr for Ipv4Addr {
-    fn inc(&self, mask: u32) -> Option<Ipv4Addr> {
+    fn inc(&self, mask_bits: u32) -> Option<Ipv4Addr> {
         let bits = self.octets();
-        let shift = 32 - mask;
-        let mask = (0xffffffff >> shift) << shift;
         let num = (bits[0] as u32) << 24 | (bits[1] as u32) << 16 | (bits[2] as u32) << 8 |
                   (bits[3] as u32);
 
         let next = num + 1;
-        if next & mask == num & mask {
+        if next & mask_bits == num & mask_bits {
             Some(next.into())
         } else {
             None
@@ -82,39 +80,16 @@ impl<R: Read> Distcc<R> {
         true
     }
 
-    fn match_done_section(&mut self) -> bool {
-
-        if let Some((section, size)) = self.read_section() {
-            if section == "DONE".as_ref() {
-                self.version = size;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    fn match_stat_section(&mut self) -> Option<usize> {
-
-        if let Some((section, size)) = self.read_section() {
-            if section == "STAT".as_ref() {
-                return Some(size);
-            }
-        }
-
-        None
-    }
-
     fn match_section<T: AsRef<str>>(&mut self,
                                     section: T,
                                     sec_type: SectionType)
                                     -> Option<SectionContent> {
 
-        let mut section = [0; 4];
+        let mut section_buf = [0; 4];
         let mut size = [0; 8];
 
-        if let Ok(r) = self.rdr.read(&mut section) {
-            if r != 4 {
+        if let Ok(r) = self.rdr.read(&mut section_buf) {
+            if r != 4 || &section_buf[..] != section.as_ref().as_bytes() {
                 return None;
             }
         } else {
@@ -195,6 +170,8 @@ fn hex_to_num(array: &[u8]) -> Result<usize, ()> {
 
 fn generate_addr(base: Ipv4Addr, mask: u32) -> Receiver<Ipv4Addr> {
     let (tx, rx) = channel();
+    let shift = 32 - mask;
+    let mask = (0xffffffff >> shift) << shift;
 
     thread::spawn(move || {
         let mut ip = base;
@@ -305,11 +282,19 @@ fn test_hex_to_num() {
 #[test]
 fn test_ipaddr_inc() {
     let addr = "127.0.0.0".parse::<Ipv4Addr>().unwrap();
-    assert_eq!(addr.inc(31), Some("127.0.0.1".parse().unwrap()));
+    assert_eq!(addr.inc(0xfffffffe), Some("127.0.0.1".parse().unwrap()));
 
     let addr = "127.0.0.255".parse::<Ipv4Addr>().unwrap();
-    assert_eq!(addr.inc(24), None);
+    assert_eq!(addr.inc(0xffffff00), None);
 
     let addr = "127.0.0.255".parse::<Ipv4Addr>().unwrap();
-    assert_eq!(addr.inc(23), Some("127.0.1.0".parse().unwrap()));
+    assert_eq!(addr.inc(0xfffffe00), Some("127.0.1.0".parse().unwrap()));
+}
+
+#[test]
+fn test_generate_ip() {
+    let rx = generate_addr(Ipv4Addr::new(127, 0, 0, 0), 31);
+    assert_eq!(rx.recv().unwrap(), Ipv4Addr::new(127, 0, 0, 0));
+    assert_eq!(rx.recv().unwrap(), Ipv4Addr::new(127, 0, 0, 1));
+    assert!(rx.recv().is_err());
 }
