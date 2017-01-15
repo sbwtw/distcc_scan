@@ -146,15 +146,6 @@ impl<R: Read> Distcc<R> {
             }
         }
     }
-
-    fn read_section(&mut self) -> Option<([u8; 4], usize)> {
-
-        // if let Ok(num) = hex_to_num(&size) {
-        // return Some((section, num));
-        // }
-
-        None
-    }
 }
 
 fn num_to_hex(num: u32) -> String {
@@ -273,16 +264,6 @@ fn test_live(ip: Ipv4Addr) -> bool {
 
     let mut distcc = Distcc::new(&mut stream);
     distcc.verify_package()
-
-
-    // let mut buf = [0; 1024];
-    // let r = stream.read(&mut buf);
-    // println!("{:?}", r);
-    // for i in buf.iter() {
-    //     print!("{}", *i as char);
-    // }
-
-    // true
 }
 
 fn main() {
