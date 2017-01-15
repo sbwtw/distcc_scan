@@ -39,6 +39,16 @@ struct Distcc<R> {
     version: usize,
 }
 
+enum SectionContent {
+    Length(usize),
+    Content(Vec<u8>),
+}
+
+enum SectionType {
+    Length,
+    Content,
+}
+
 impl<R: Read> Distcc<R> {
     fn new(rdr: R) -> Distcc<R> {
         Distcc {
@@ -56,13 +66,49 @@ impl<R: Read> Distcc<R> {
         //     print!("{}", *c as char);
         // }
 
-        let (section, size) = self.read_section().unwrap();
-        println!("{:?} - {}", String::from_utf8_lossy(&section[..]), size);
+        if let Some(SectionContent::Length(len)) = self.match_section("DONE", SectionType::Length) {
+            info!("got done section, version is {}", len);
+        } else {
+            return false;
+        }
+
+        if let Some(SectionContent::Length(stat)) =
+            self.match_section("STAT", SectionType::Length) {
+            info!("got stat section, status is {}", stat);
+        } else {
+            return false;
+        }
 
         true
     }
 
-    fn read_section(&mut self) -> Option<([u8; 4], usize)> {
+    fn match_done_section(&mut self) -> bool {
+
+        if let Some((section, size)) = self.read_section() {
+            if section == "DONE".as_ref() {
+                self.version = size;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    fn match_stat_section(&mut self) -> Option<usize> {
+
+        if let Some((section, size)) = self.read_section() {
+            if section == "STAT".as_ref() {
+                return Some(size);
+            }
+        }
+
+        None
+    }
+
+    fn match_section<T: AsRef<str>>(&mut self,
+                                    section: T,
+                                    sec_type: SectionType)
+                                    -> Option<SectionContent> {
 
         let mut section = [0; 4];
         let mut size = [0; 8];
@@ -71,17 +117,41 @@ impl<R: Read> Distcc<R> {
             if r != 4 {
                 return None;
             }
+        } else {
+            return None;
         }
 
         if let Ok(r) = self.rdr.read(&mut size) {
             if r != 8 {
                 return None;
             }
+        } else {
+            return None;
         }
 
-        if let Ok(num) = hex_to_num(&size) {
-            return Some((section, num));
+        let len = match hex_to_num(&size) {
+            Ok(num) => num,
+            _ => return None,
+        };
+
+        match sec_type {
+            SectionType::Length => Some(SectionContent::Length(len)),
+            SectionType::Content => {
+                let mut buf = Vec::<u8>::with_capacity(len);
+                if self.rdr.read_exact(&mut buf).is_ok() {
+                    Some(SectionContent::Content(buf))
+                } else {
+                    None
+                }
+            }
         }
+    }
+
+    fn read_section(&mut self) -> Option<([u8; 4], usize)> {
+
+        // if let Ok(num) = hex_to_num(&size) {
+        // return Some((section, num));
+        // }
 
         None
     }
