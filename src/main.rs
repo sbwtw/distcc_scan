@@ -194,7 +194,7 @@ fn scan(ip: Ipv4Addr, mask: u32) -> Receiver<Ipv4Addr> {
     let rx = Arc::new(Mutex::new(generate_addr(ip, mask)));
     let (dst_tx, dst_rx) = channel();
 
-    for i in 0..3 {
+    for i in 0..5 {
         let rx = rx.clone();
         let tx = dst_tx.clone();
         thread::spawn(move || {
@@ -247,7 +247,7 @@ fn main() {
 
     env_logger::init().unwrap();
 
-    let rx = scan(Ipv4Addr::new(127, 0, 0, 0), 31);
+    let rx = scan(Ipv4Addr::new(10, 0, 10, 0), 22);
     while let Ok(r) = rx.recv() {
         println!("{:?}", r);
     }
