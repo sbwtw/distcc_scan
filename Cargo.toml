@@ -7,3 +7,4 @@ authors = ["石博文 <sbw@sbw.so>"]
 log = "*"
 env_logger = "*"
 minilzo = "*"
+clap = "*"

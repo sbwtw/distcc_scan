@@ -3,6 +3,7 @@
 extern crate log;
 extern crate env_logger;
 extern crate minilzo;
+extern crate clap;
 
 use std::net::{TcpStream, Ipv4Addr, SocketAddrV4};
 use std::io::{Write, Read};
@@ -10,9 +11,10 @@ use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver};
 use std::thread;
 use std::process::{Command, Stdio};
-
 use minilzo::compress;
-// use minilzo::decompress;
+use clap::{App, Arg};
+
+const TEST_HEAD: &'static [u8] = b"DIST00000002ARGC00000005ARGV00000003g++ARGV00000002-cARGV00000002-oARGV00000001aARGV000000051.cppDOTI";
 
 trait IncAddr {
     fn inc(&self, mask: u32) -> Option<Ipv4Addr>;
@@ -237,14 +239,6 @@ fn test_live(ip: Ipv4Addr) -> bool {
     let data = "\n    int b(){   int a=0;    return a;} \n\n int c () { int aaa=0; return aaa;}       \
                 /*  aaa aa aa aa */";
     let compressed = compress(data.as_bytes()).unwrap();
-
-    // println!("{:?}", compressed);
-    // println!("{:?}", String::from_utf8_lossy(&compressed).unwrap());
-
-    // println!("Hello, world! -###{:?}###-", compressed);
-
-    let test = "DIST00000002ARGC00000005ARGV00000003g++ARGV00000002-cARGV00000002-oARGV00000001aARGV000000051.\
-                cppDOTI";
     let r = num_to_hex(compressed.len() as u32);
     let mut stream = match TcpStream::connect(SocketAddrV4::new(ip, 3632)) {
         Ok(s) => s,
@@ -252,7 +246,7 @@ fn test_live(ip: Ipv4Addr) -> bool {
     };
 
     stream.set_nodelay(true).unwrap();
-    stream.write(test.as_bytes()).unwrap();
+    stream.write(TEST_HEAD).unwrap();
     stream.write(r.as_bytes()).unwrap();
     stream.write(&compressed).unwrap();
     stream.flush().unwrap();
@@ -265,7 +259,19 @@ fn main() {
 
     env_logger::init().unwrap();
 
-    let rx = scan(Ipv4Addr::new(10, 0, 10, 0), 21);
+    let matches = App::new("distcc_scan")
+        .author("sbw <sbw@sbw.so>")
+        .version("0.0.0")
+        .about("distcc service finder")
+        .arg(Arg::with_name("ip").takes_value(true).required(true).help("specifiction ip range"))
+        .get_matches();
+
+    let ip_info: Vec<&str> = matches.value_of("ip").unwrap().split('/').collect();
+    assert_eq!(ip_info.len(), 2, "ip range error.");
+    let ip: Ipv4Addr = ip_info[0].parse().unwrap();
+    let mask: u32 = ip_info[1].parse().unwrap();
+
+    let rx = scan(ip, mask);
     while let Ok(r) = rx.recv() {
         println!("{:?}", r);
     }
