@@ -9,6 +9,7 @@ use std::io::{Write, Read};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver};
 use std::thread;
+use std::process::{Command, Stdio};
 
 use minilzo::compress;
 // use minilzo::decompress;
@@ -194,21 +195,18 @@ fn scan(ip: Ipv4Addr, mask: u32) -> Receiver<Ipv4Addr> {
     let rx = Arc::new(Mutex::new(generate_addr(ip, mask)));
     let (dst_tx, dst_rx) = channel();
 
-    for i in 0..5 {
+    for i in 0..10 {
         let rx = rx.clone();
         let tx = dst_tx.clone();
-        thread::spawn(move || {
+        thread::spawn(move || loop {
+            let ip = match rx.lock().unwrap().recv() {
+                Ok(ip) => ip,
+                _ => break,
+            };
 
-            loop {
-                let ip = match rx.lock().unwrap().recv() {
-                    Ok(ip) => ip,
-                    _ => break,
-                };
-
-                info!("scan with thread {} for ip {:?}", i, ip);
-                if test_live(ip) {
-                    tx.send(ip).unwrap();
-                }
+            info!("scan with thread {} for ip {:?}", i, ip);
+            if test_live(ip) {
+                tx.send(ip).unwrap();
             }
         });
     }
@@ -217,6 +215,24 @@ fn scan(ip: Ipv4Addr, mask: u32) -> Receiver<Ipv4Addr> {
 }
 
 fn test_live(ip: Ipv4Addr) -> bool {
+
+    let ips = ip.octets();
+    let ip_str = format!("{}.{}.{}.{}", ips[0], ips[1], ips[2], ips[3]);
+    // ping test
+    let status = Command::new("ping")
+        .arg("-c")
+        .arg("1")
+        .arg("-W")
+        .arg("1")
+        .arg(ip_str)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .unwrap();
+    if !status.success() {
+        return false;
+    }
 
     let data = "\n    int b(){   int a=0;    return a;} \n\n int c () { int aaa=0; return aaa;}       \
                 /*  aaa aa aa aa */";
@@ -235,9 +251,11 @@ fn test_live(ip: Ipv4Addr) -> bool {
         _ => return false,
     };
 
+    stream.set_nodelay(true).unwrap();
     stream.write(test.as_bytes()).unwrap();
     stream.write(r.as_bytes()).unwrap();
     stream.write(&compressed).unwrap();
+    stream.flush().unwrap();
 
     let mut distcc = Distcc::new(&mut stream);
     distcc.verify_package()
@@ -247,7 +265,7 @@ fn main() {
 
     env_logger::init().unwrap();
 
-    let rx = scan(Ipv4Addr::new(10, 0, 10, 0), 22);
+    let rx = scan(Ipv4Addr::new(10, 0, 10, 0), 21);
     while let Ok(r) = rx.recv() {
         println!("{:?}", r);
     }
