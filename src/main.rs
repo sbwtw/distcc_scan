@@ -4,6 +4,8 @@ extern crate log;
 extern crate env_logger;
 extern crate minilzo;
 extern crate clap;
+#[macro_use]
+extern crate lazy_static;
 
 use std::net::{TcpStream, Ipv4Addr, SocketAddrV4};
 use std::io::{Write, Read};
@@ -14,7 +16,21 @@ use std::process::{Command, Stdio};
 use minilzo::compress;
 use clap::{App, Arg};
 
-const TEST_HEAD: &'static [u8] = b"DIST00000002ARGC00000005ARGV00000003g++ARGV00000002-cARGV00000002-oARGV00000001aARGV000000051.cppDOTI";
+lazy_static!{
+    static ref TEST_PACKAGE: Vec<u8> = {
+        let head = b"DIST00000002ARGC00000005ARGV00000003g++ARGV00000002-cARGV00000002-oARGV00000001aARGV000000051.cppDOTI";
+        let data = b"\n    int b(){   int a=0;    return a;} \n\n int c () { int aaa=0; return aaa;}       /*  aaa aa aa aa */";
+        let mut compressed = compress(data).unwrap();
+        let len_hex = num_to_hex(compressed.len() as u32);
+
+        let mut package: Vec<u8> = vec![];
+        package.append(&mut head.to_vec());
+        package.append(&mut len_hex.as_bytes().to_vec());
+        package.append(&mut compressed);
+
+        package
+    };
+}
 
 trait IncAddr {
     fn inc(&self, mask: u32) -> Option<Ipv4Addr>;
@@ -236,19 +252,13 @@ fn test_live(ip: Ipv4Addr) -> bool {
         return false;
     }
 
-    let data = "\n    int b(){   int a=0;    return a;} \n\n int c () { int aaa=0; return aaa;}       \
-                /*  aaa aa aa aa */";
-    let compressed = compress(data.as_bytes()).unwrap();
-    let r = num_to_hex(compressed.len() as u32);
     let mut stream = match TcpStream::connect(SocketAddrV4::new(ip, 3632)) {
         Ok(s) => s,
         _ => return false,
     };
 
     stream.set_nodelay(true).unwrap();
-    stream.write(TEST_HEAD).unwrap();
-    stream.write(r.as_bytes()).unwrap();
-    stream.write(&compressed).unwrap();
+    stream.write(&*TEST_PACKAGE).unwrap();
     stream.flush().unwrap();
 
     let mut distcc = Distcc::new(&mut stream);
